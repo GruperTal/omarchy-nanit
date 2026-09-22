@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "gruper.nanit",
+  "name": "Nanit",
+  "version": "0.1.0",
+  "author": "Tal Gruper",
+  "license": "MIT",
+  "description": "Nanit baby monitor in the bar: watch the camera in mpv, keep its audio playing while you work, and toggle the night light and white noise.",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Nanit",
+    "description": "Watch, listen, night light and white noise for a Nanit camera.",
+    "category": "Home",
+    "aliases": [
+      "nanit",
+      "baby",
+      "monitor"
+    ],
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
