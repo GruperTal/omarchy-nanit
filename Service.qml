@@ -1,11 +1,14 @@
 import QtQuick
+import QtMultimedia
 import Quickshell
 import Quickshell.Io
 
 // Mounted once per shell session; bar widgets only render what lives here.
-// Everything talks to the camera through bin/nanit (aionanit, one short cloud
-// session per call). The audio stream is the exception: `nanit play` stays up
-// for as long as mpv does and keeps the camera pushing.
+// Camera commands go through bin/nanit (aionanit, one short cloud session per
+// call). The stream is different: `nanit stream` prints the RTMPS URL and stays
+// up to keep the camera pushing, and a MediaPlayer here plays its audio. Video
+// is a second, muted player inside the open panel: Qt's ffmpeg backend ignores
+// a video sink attached after playback starts, so the panel makes its own.
 QtObject {
   id: root
 
@@ -17,10 +20,14 @@ QtObject {
 
   property var status: null            // last `nanit status` JSON, null until the first fetch
   property bool loggedIn: true         // false once the CLI says it has no session
-  property bool listening: false       // "always on" audio: mpv --no-video, restarted if it dies
-  readonly property bool audioUp: listenProcess.running
-  readonly property bool watching: watchProcess.running
+  property bool listening: false       // always-on audio, persisted across shell restarts
+  property bool watching: false        // video wanted while a panel is open
+  readonly property bool wanted: listening || watching
+  property string url: ""
   readonly property bool busy: cliProcess.running
+  readonly property bool live: player.playbackState === MediaPlayer.PlayingState
+    && (player.mediaStatus === MediaPlayer.BufferedMedia || player.mediaStatus === MediaPlayer.BufferingMedia)
+  readonly property bool connecting: wanted && !live
   property string notice: ""
   property bool noticeIsError: false
 
@@ -42,14 +49,13 @@ QtObject {
   function setSound(on) { run(["sound", on ? "on" : "off"]) }
   function toggleLight() { setLight(!light) }
   function toggleSound() { setSound(!sound) }
-
-  function watch() {
-    if (watchProcess.running) { watchProcess.signal(15); return }
-    watchProcess.running = true
-  }
-
   function setListening(on) { listening = on === true }
   function toggleListen() { listening = !listening }
+  function setWatching(on) { watching = on === true }
+  function toggleWatch() { watching = !watching }
+
+  // The external mpv window, for a second screen or a bigger picture.
+  function openWindow() { Quickshell.execDetached([cli, "play"]) }
 
   // Opens a terminal for the one-time venv setup and the MFA login.
   function login() {
@@ -70,10 +76,34 @@ QtObject {
     noticeTimer.restart()
   }
 
-  onListeningChanged: {
-    listenFile.setText(listening ? "1\n" : "0\n")
-    if (listening) { if (!listenProcess.running) listenProcess.running = true }
-    else if (listenProcess.running) listenProcess.signal(15)
+  function startStream() { if (!streamProcess.running) streamProcess.running = true }
+
+  function stopStream() {
+    player.stop()
+    player.source = ""
+    url = ""
+    if (streamProcess.running) streamProcess.signal(15)
+  }
+
+  // Anything that kills the stream ends here: drop it and come back with a fresh URL.
+  function restartStream(why) {
+    if (!wanted) return
+    say("Stream " + why + ", reconnecting…", true)
+    stopStream()
+    streamRestart.restart()
+  }
+
+  onWantedChanged: wanted ? startStream() : stopStream()
+  onListeningChanged: listenFile.setText(listening ? "1\n" : "0\n")
+
+  property MediaPlayer player: MediaPlayer {
+    audioOutput: AudioOutput {}
+    // Audio only here; decoding 1080p nobody looks at is wasted CPU.
+    onHasVideoChanged: if (hasVideo) activeVideoTrack = -1
+    onErrorOccurred: function(error, message) { root.restartStream("failed (" + root.elide(message) + ")") }
+    onMediaStatusChanged: {
+      if (mediaStatus === MediaPlayer.EndOfMedia || mediaStatus === MediaPlayer.InvalidMedia) root.restartStream("ended")
+    }
   }
 
   property Process cliProcess: Process {
@@ -91,28 +121,25 @@ QtObject {
     }
   }
 
-  property Process listenProcess: Process {
-    command: [root.cli, "play", "--no-video"]
-    stderr: StdioCollector { id: listenErr; waitForEnd: true }
+  property Process streamProcess: Process {
+    command: [root.cli, "stream"]
+    stdout: SplitParser {
+      onRead: function(line) {
+        if (line.indexOf("rtmps://") !== 0) return
+        root.url = line.trim()
+        root.player.source = root.url
+        root.player.play()
+      }
+    }
+    stderr: StdioCollector { id: streamErr; waitForEnd: true }
     onExited: function(exitCode) {
-      if (!root.listening) return
-      if (exitCode === 3) { root.loggedIn = false; root.listening = false; return }
-      // ponytail: flat 5s retry; add backoff if Nanit ever rate-limits us
-      root.say("Audio stream dropped, reconnecting…" + (exitCode !== 0 ? " (" + root.elide(listenErr.text) + ")" : ""), exitCode !== 0)
-      listenRestart.restart()
+      if (exitCode === 3) { root.loggedIn = false; root.listening = false; root.watching = false; return }
+      if (root.wanted) root.restartStream("dropped" + (exitCode !== 0 ? " (" + root.elide(streamErr.text) + ")" : ""))
     }
   }
 
-  property Process watchProcess: Process {
-    command: [root.cli, "play"]
-    stderr: StdioCollector { id: watchErr; waitForEnd: true }
-    onExited: function(exitCode) {
-      if (exitCode === 3) root.loggedIn = false
-      else if (exitCode !== 0 && exitCode !== 143) root.say(root.elide(watchErr.text) || "mpv exited", true)
-    }
-  }
-
-  property Timer listenRestart: Timer { interval: 5000; onTriggered: if (root.listening && !listenProcess.running) listenProcess.running = true }
+  // ponytail: flat 5s retry; add backoff if Nanit ever rate-limits us
+  property Timer streamRestart: Timer { interval: 5000; onTriggered: if (root.wanted) root.startStream() }
   property Timer noticeTimer: Timer { interval: 8000; onTriggered: root.notice = "" }
 
   // Survives shell restarts and logins, so "always on" really is.
@@ -128,11 +155,15 @@ QtObject {
 
     function toggleListen(): void { root.toggleListen() }
     function listen(on: string): void { root.setListening(on === "on" || on === "true" || on === "1") }
-    function watch(): void { root.watch() }
+    function window(): void { root.openWindow() }
     function light(on: string): void { root.setLight(on === "on" || on === "true" || on === "1") }
     function sound(on: string): void { root.setSound(on === "on" || on === "true" || on === "1") }
     function refresh(): void { root.refresh() }
-    function status(): string { return JSON.stringify({ listening: root.listening, audioUp: root.audioUp, watching: root.watching, loggedIn: root.loggedIn, camera: root.status }) }
+    function status(): string {
+      return JSON.stringify({ listening: root.listening, watching: root.watching, live: root.live, connecting: root.connecting,
+        mediaStatus: root.player.mediaStatus, playbackState: root.player.playbackState, error: root.player.errorString,
+        activeVideoTrack: root.player.activeVideoTrack, loggedIn: root.loggedIn, camera: root.status })
+    }
     function open(): void { if (root.shell) root.shell.summon(root.pluginId, "{}") }
     function close(): void { if (root.shell) root.shell.hide(root.pluginId) }
     function panel(): void { if (root.shell) root.shell.toggle(root.pluginId, "{}") }

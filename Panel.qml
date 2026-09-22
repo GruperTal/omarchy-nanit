@@ -1,4 +1,5 @@
 import QtQuick
+import QtMultimedia
 import Quickshell
 import qs.Commons
 import qs.Ui
@@ -13,8 +14,10 @@ Panel {
   readonly property var service: bar && bar.shell ? bar.shell.serviceFor(moduleName) : null
   readonly property bool loggedIn: service ? service.loggedIn : false
   readonly property bool listening: service ? service.listening : false
-  readonly property bool audioUp: service ? service.audioUp : false
   readonly property bool watching: service ? service.watching : false
+  readonly property bool wanted: service ? service.wanted : false
+  readonly property bool live: service ? service.live : false
+  readonly property bool connecting: service ? service.connecting : false
   readonly property bool busy: service ? service.busy : false
   readonly property bool light: service ? service.light : false
   readonly property bool sound: service ? service.sound : false
@@ -25,24 +28,24 @@ Panel {
   readonly property var status: service ? service.status : null
 
   readonly property color foreground: bar ? bar.foreground : Color.foreground
+  readonly property color background: bar ? bar.background : Color.background
   readonly property color urgent: bar ? bar.urgent : Color.urgent
   readonly property color dim: Qt.darker(foreground, 1.55)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property color hoverFill: Style.hoverFillFor(foreground, Color.accent)
   readonly property color selectedFill: Style.selectedFillFor(foreground, Color.accent)
 
-  readonly property string icon: "󰹼"
   readonly property string statusText: !loggedIn ? "Not logged in"
-    : watching && audioUp ? "Watching · Listening"
-    : watching ? "Watching"
-    : audioUp ? "Listening"
-    : listening ? "Reconnecting audio…"
+    : connecting ? "Connecting…"
+    : live && listening ? "Listening"
+    : live ? "Live"
     : climate !== "" ? climate : "Idle"
 
   readonly property var rows: !loggedIn ? [
     { key: "login", icon: "󰍂", title: "Log in to Nanit", caption: "Opens a terminal for email, password and the MFA code", toggle: false, checked: false, busy: false }
   ] : [
-    { key: "watch", icon: "󰕧", title: "Watch", caption: watching ? "Video window open · click to close" : "Open the camera in an mpv window", toggle: false, checked: watching, busy: false },
+    { key: "watch", icon: "󰕧", title: "Watch", caption: listening ? "Video shows above while you listen" : watching ? "Video stops when this panel closes" : "Show the camera here", toggle: true, checked: wanted, busy: watching && connecting },
+    { key: "listen", icon: "󰋋", title: "Always-on audio", caption: listening ? (live ? "Playing" : "Connecting…") + " · keeps playing after the panel closes and after a reboot" : "Off", toggle: true, checked: listening, busy: listening && connecting },
     { key: "light", icon: "󰌵", title: "Night light", caption: light ? "On" : "Off", toggle: true, checked: light, busy: busy },
     { key: "sound", icon: "󰎇", title: "White noise", caption: sound ? "Playing" + (status && status.track ? " · " + status.track : "") : "Off", toggle: true, checked: sound, busy: busy }
   ]
@@ -56,7 +59,8 @@ Panel {
   function activate(key) {
     if (!service) return
     if (key === "login") service.login()
-    else if (key === "watch") service.watch()
+    else if (key === "watch") { if (!listening) service.toggleWatch() }
+    else if (key === "listen") service.toggleListen()
     else if (key === "light") service.toggleLight()
     else if (key === "sound") service.toggleSound()
   }
@@ -72,25 +76,44 @@ Panel {
   }
 
   onOpenedChanged: {
+    if (!service) return
     if (opened) {
       cursorActive = false
       cursorIndex = 0
-      if (service) service.refresh()
+      service.refresh()
+    } else {
+      service.setWatching(false)
     }
   }
 
-  WidgetButton {
+  BarIconButton {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.icon
-    fontSize: Style.bar.iconFont
-    dimmed: !root.audioUp && !root.watching
+    dimmed: !root.wanted
     tooltipText: root.name + " · " + root.statusText
+    iconComponent: Component {
+      Item {
+        NanitIcon {
+          anchors.centerIn: parent
+          iconSize: Style.space(12)
+          color: root.foreground
+          background: root.background
+          // Pulses while the stream is being negotiated.
+          SequentialAnimation on opacity {
+            running: root.connecting
+            loops: Animation.Infinite
+            onRunningChanged: if (!running) opacity = 1
+            NumberAnimation { to: 0.25; duration: 600; easing.type: Easing.InOutSine }
+            NumberAnimation { to: 1.0; duration: 600; easing.type: Easing.InOutSine }
+          }
+        }
+      }
+    }
     onPressed: function(mouseButton) {
       if (!root.service) return
       if (mouseButton === Qt.RightButton) root.service.toggleListen()
-      else if (mouseButton === Qt.MiddleButton) root.service.watch()
+      else if (mouseButton === Qt.MiddleButton) root.service.openWindow()
       else root.toggle()
     }
   }
@@ -102,8 +125,8 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Style.space(340))
-    contentHeight: panel.fittedContentHeight(column.implicitHeight, Style.space(640))
+    contentWidth: panel.fittedContentWidth(Style.space(root.wanted ? 460 : 340))
+    contentHeight: panel.fittedContentHeight(column.implicitHeight, Style.space(720))
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -115,10 +138,11 @@ Panel {
       onTextKey: function(text) {
         if (!root.service) return
         if (text === "l") root.service.toggleListen()
-        else if (text === "w") root.service.watch()
+        else if (text === "w") root.activate("watch")
         else if (text === "n") root.service.toggleLight()
         else if (text === "s") root.service.toggleSound()
         else if (text === "r") root.service.refresh()
+        else if (text === "o") root.service.openWindow()
       }
 
       Column {
@@ -130,26 +154,69 @@ Panel {
           width: parent.width
           title: root.name
           meta: root.statusText
-          detail: root.loggedIn ? "Always-on audio" : ""
+          detail: root.climate !== "" && root.statusText !== root.climate ? root.climate : ""
           foreground: root.foreground
           fontFamily: root.fontFamily
-          iconOpacity: root.audioUp || root.watching ? 1.0 : 0.5
+          iconOpacity: root.live ? 1.0 : 0.5
           iconComponent: Component {
-            Text {
-              text: root.icon
+            NanitIcon {
+              iconSize: Style.font.display
               color: root.foreground
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.display
+              background: Color.popups.background
             }
           }
-          // The headline feature: audio keeps playing while you work, and comes back after a reboot.
           trailingControl: Component {
-            ToggleSwitch {
+            PanelActionButton {
               visible: root.loggedIn
-              checked: root.listening
-              busy: root.listening && !root.audioUp
+              iconText: "󰑐"
+              tooltipText: "Refresh"
               foreground: root.foreground
-              onToggled: if (root.service) root.service.toggleListen()
+              onClicked: if (root.service) root.service.refresh()
+            }
+          }
+        }
+
+        // The picture. Hidden until a stream is wanted so the panel stays small.
+        Rectangle {
+          width: parent.width
+          height: root.wanted ? Math.round(width * 9 / 16) : 0
+          visible: root.wanted
+          color: "black"
+          radius: Style.cornerRadius
+          clip: true
+
+          // Own muted player, built with its sink attached, torn down on close.
+          Loader {
+            id: videoLoader
+            anchors.fill: parent
+            active: root.opened && root.wanted && root.service && root.service.url !== ""
+            sourceComponent: Item {
+              readonly property bool live: vp.playbackState === MediaPlayer.PlayingState
+                && (vp.mediaStatus === MediaPlayer.BufferedMedia || vp.mediaStatus === MediaPlayer.BufferingMedia)
+              readonly property string error: vp.errorString
+              VideoOutput { id: out; anchors.fill: parent; fillMode: VideoOutput.PreserveAspectFit }
+              MediaPlayer {
+                id: vp
+                source: root.service.url   // a stream restart changes the URL and reloads this too
+                videoOutput: out
+                audioOutput: AudioOutput { muted: true }
+                Component.onCompleted: play()
+              }
+            }
+          }
+
+          Text {
+            anchors.centerIn: parent
+            visible: !(videoLoader.item && videoLoader.item.live)
+            text: videoLoader.item && videoLoader.item.error !== "" ? "Video failed: " + videoLoader.item.error : "Connecting to " + root.name + "…"
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.body
+            SequentialAnimation on opacity {
+              running: visible
+              loops: Animation.Infinite
+              NumberAnimation { to: 0.3; duration: 700 }
+              NumberAnimation { to: 1.0; duration: 700 }
             }
           }
         }

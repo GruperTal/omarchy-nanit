@@ -1,7 +1,7 @@
 # Nanit — Omarchy plugin
 
-Your Nanit baby monitor in the Omarchy bar. Click the baby face to open the
-camera in an mpv window, keep its audio playing while you work ("always-on"
+Your Nanit baby monitor in the Omarchy bar. Click the Nanit mark to see the
+camera right in the popup, keep its audio playing while you work ("always-on"
 audio that comes back after a reboot), and toggle the night light and the
 camera's white noise. Temperature and humidity show in the panel.
 
@@ -33,30 +33,41 @@ code Nanit sends you. The session lands in `~/.local/state/omarchy-nanit/session
 |---|---|
 | Bar icon, left click | open the panel |
 | Bar icon, right click | toggle always-on audio |
-| Bar icon, middle click | open the video window |
-| Panel switch (top) | always-on audio: `mpv --no-video`, restarted if the stream drops, persisted across shell restarts |
-| Watch | video window; click again to close it |
+| Bar icon, middle click | open the camera in an external mpv window |
+| Watch | video in the popup while it is open (with sound) |
+| Always-on audio | keeps playing after the popup closes and after a reboot; the bar icon pulses while it connects |
 | Night light | camera night light |
 | White noise | the camera's own sound machine |
 
-Keys inside the panel: `j`/`k` move, `enter` activate, `l` listen, `w` watch,
-`n` night light, `s` sound, `r` refresh, `esc` close.
+Keys inside the panel: `j`/`k` move, `enter` activate, `w` watch, `l` listen,
+`n` night light, `s` sound, `r` refresh, `o` mpv window, `esc` close.
 
 IPC, for keybindings:
 
 ```bash
 omarchy-shell gruper.nanit toggleListen
-omarchy-shell gruper.nanit watch
+omarchy-shell gruper.nanit listen on
 omarchy-shell gruper.nanit light on
 omarchy-shell gruper.nanit sound off
+omarchy-shell gruper.nanit window
 omarchy-shell gruper.nanit status
 ```
 
-The CLI works on its own too: `bin/nanit status|light|sound|volume|play`.
+The CLI works on its own too: `bin/nanit status|light|sound|volume|stream|play`.
 
-## How the stream stays up
+## How the stream works
 
-The camera pushes RTMPS only while asked. `nanit play` sends the start
-request, launches mpv, and re-sends it every five minutes until mpv exits
-(the camera lapses about 20 minutes after the last request). If the stream
-still drops, the service restarts the whole thing after five seconds.
+The camera pushes RTMPS only while asked. `nanit stream` sends the start
+request, prints the URL, and re-sends the request every five minutes until it
+is killed (the camera lapses about 20 minutes after the last request). The
+service plays that URL with Qt Multimedia for audio; the popup opens a second,
+muted player for the picture, because Qt's ffmpeg backend ignores a video sink
+attached after playback has started. If the stream drops, everything restarts
+with a fresh URL after five seconds.
+
+Do not pass mpv `--profile=low-latency` on this stream: it stops probing
+before the AAC track shows up and you get silent video.
+
+## Hacking
+
+Omarchy caches plugin QML, so after editing run `omarchy restart shell`.

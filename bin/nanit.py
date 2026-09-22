@@ -7,6 +7,7 @@
   nanit sound on|off       white noise from the camera speaker
   nanit volume 0-100       camera speaker volume
   nanit play [--no-video]  stream to mpv; keeps the camera pushing until mpv exits
+  nanit stream             print the RTMPS URL, keep the camera pushing until killed
 """
 
 import asyncio
@@ -105,11 +106,31 @@ async def volume(camera, level):
     await status(camera)
 
 
+async def stream(camera):
+    url = await camera.async_get_stream_rtmps_url()
+    await camera.async_start_streaming(rtmps_url=url)
+    print(url, flush=True)
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, stop.set)
+    while not stop.is_set():
+        try:
+            await asyncio.wait_for(stop.wait(), KEEPALIVE)
+        except TimeoutError:
+            try:
+                await camera.async_start_streaming(rtmps_url=url, reconnect_on_failure=False)
+            except Exception as err:  # noqa: BLE001 - best effort; the player notices a dead stream
+                logging.warning("keepalive failed: %s", err)
+    return 0
+
+
 async def play(camera, no_video):
     url = await camera.async_get_stream_rtmps_url()
     await camera.async_start_streaming(rtmps_url=url)
     name = json.loads(SESSION.read_text()).get("name", "Nanit")
-    args = ["mpv", "--profile=low-latency", "--really-quiet", f"--title=Nanit · {name}"]
+    # No --profile=low-latency: it stops probing before the AAC track appears and plays silent video.
+    args = ["mpv", "--really-quiet", f"--title=Nanit · {name}"]
     if no_video:
         args.append("--no-video")
     libc = ctypes.CDLL("libc.so.6")
@@ -146,6 +167,8 @@ def main(argv):
             return asyncio.run(session(lambda c: sound(c, onoff[rest[0]])))
         if cmd == "volume" and rest and rest[0].isdigit():
             return asyncio.run(session(lambda c: volume(c, int(rest[0]))))
+        if cmd == "stream":
+            return asyncio.run(session(stream))
         if cmd == "play":
             return asyncio.run(session(lambda c: play(c, "--no-video" in rest)))
     except NanitAuthError as err:
