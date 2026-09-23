@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Portable checks: manifest shape, QML entry points exist, the CLI parses.
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+python3 "$root/scripts/validate_manifest.py" "$root"
+python3 -m py_compile "$root/bin/nanit.py"
+bash -n "$root/bin/nanit"
+grep -q '"service": "Service.qml"' "$root/manifest.json"
+for f in Service.qml Panel.qml NanitIcon.qml; do test -f "$root/$f"; done
+
+if command -v omarchy >/dev/null 2>&1; then
+  omarchy plugin validate "$root"
+fi
+
+printf 'All portable plugin checks passed.\n'
