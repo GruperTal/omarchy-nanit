@@ -152,8 +152,7 @@ Panel {
         PanelHero {
           width: parent.width
           title: root.name
-          meta: root.statusText
-          detail: root.climate !== "" && root.statusText !== root.climate ? root.climate : ""
+          meta: root.statusText + (root.climate !== "" && root.statusText !== root.climate ? " · " + root.climate : "")
           foreground: root.foreground
           fontFamily: root.fontFamily
           iconOpacity: root.live ? 1.0 : 0.5
