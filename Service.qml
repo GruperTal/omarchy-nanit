@@ -21,8 +21,9 @@ QtObject {
   property var status: null            // last `nanit status` JSON, null until the first fetch
   property bool loggedIn: true         // false once the CLI says it has no session
   property bool listening: false       // always-on audio, persisted across shell restarts
-  property bool watching: false        // video wanted while a panel is open
-  readonly property bool wanted: listening || watching
+  property bool watching: false        // a panel is open and shows the picture
+  readonly property bool windowOpen: windowProcess.running
+  readonly property bool wanted: listening || watching || windowOpen
   property string url: ""
   readonly property bool busy: cliProcess.running
   readonly property bool live: player.playbackState === MediaPlayer.PlayingState
@@ -54,8 +55,16 @@ QtObject {
   function setWatching(on) { watching = on === true }
   function toggleWatch() { watching = !watching }
 
-  // The external mpv window, for a second screen or a bigger picture.
-  function openWindow() { Quickshell.execDetached([cli, "play"]) }
+  // One external mpv window, for a second screen or a bigger picture. Click
+  // again to close it. It plays its own audio, so the in-shell player mutes.
+  function toggleWindow() {
+    if (windowProcess.running) { windowProcess.signal(15); return }
+    windowProcess.command = url !== ""
+      ? ["mpv", "--force-window=immediate", "--really-quiet", "--title=Nanit · " + name, url]
+      : [cli, "play"]   // no stream yet: let the CLI negotiate one (slower)
+    windowProcess.running = true
+    say("Opening a window…", false)
+  }
 
   // Opens a terminal for the one-time venv setup and the MFA login.
   function login() {
@@ -97,7 +106,7 @@ QtObject {
   onListeningChanged: listenFile.setText(listening ? "1\n" : "0\n")
 
   property MediaPlayer player: MediaPlayer {
-    audioOutput: AudioOutput {}
+    audioOutput: AudioOutput { muted: root.windowOpen }
     // Audio only here; decoding 1080p nobody looks at is wasted CPU.
     onHasVideoChanged: if (hasVideo) activeVideoTrack = -1
     onErrorOccurred: function(error, message) { root.restartStream("failed (" + root.elide(message) + ")") }
@@ -118,6 +127,13 @@ QtObject {
       } else {
         root.say(root.elide(cliErr.text) || "nanit failed", true)
       }
+    }
+  }
+
+  property Process windowProcess: Process {
+    stderr: StdioCollector { id: windowErr; waitForEnd: true }
+    onExited: function(exitCode) {
+      if (exitCode === 2 || exitCode === 3) root.say("mpv could not play the stream: " + root.elide(windowErr.text), true)
     }
   }
 
@@ -155,12 +171,12 @@ QtObject {
 
     function toggleListen(): void { root.toggleListen() }
     function listen(on: string): void { root.setListening(on === "on" || on === "true" || on === "1") }
-    function window(): void { root.openWindow() }
+    function window(): void { root.toggleWindow() }
     function light(on: string): void { root.setLight(on === "on" || on === "true" || on === "1") }
     function sound(on: string): void { root.setSound(on === "on" || on === "true" || on === "1") }
     function refresh(): void { root.refresh() }
     function status(): string {
-      return JSON.stringify({ listening: root.listening, watching: root.watching, live: root.live, connecting: root.connecting,
+      return JSON.stringify({ listening: root.listening, watching: root.watching, windowOpen: root.windowOpen, live: root.live, connecting: root.connecting,
         mediaStatus: root.player.mediaStatus, playbackState: root.player.playbackState, error: root.player.errorString,
         activeVideoTrack: root.player.activeVideoTrack, loggedIn: root.loggedIn, camera: root.status })
     }

@@ -16,6 +16,7 @@ Panel {
   readonly property bool listening: service ? service.listening : false
   readonly property bool watching: service ? service.watching : false
   readonly property bool wanted: service ? service.wanted : false
+  readonly property bool windowOpen: service ? service.windowOpen : false
   readonly property bool live: service ? service.live : false
   readonly property bool connecting: service ? service.connecting : false
   readonly property bool busy: service ? service.busy : false
@@ -44,7 +45,6 @@ Panel {
   readonly property var rows: !loggedIn ? [
     { key: "login", icon: "󰍂", title: "Log in to Nanit", caption: "Opens a terminal for email, password and the MFA code", toggle: false, checked: false, busy: false }
   ] : [
-    { key: "watch", icon: "󰕧", title: "Watch", caption: listening ? "Video shows above while you listen" : watching ? "Video stops when this panel closes" : "Show the camera here", toggle: true, checked: wanted, busy: watching && connecting },
     { key: "listen", icon: "󰋋", title: "Always-on audio", caption: listening ? (live ? "Playing" : "Connecting…") + " · keeps playing after the panel closes and after a reboot" : "Off", toggle: true, checked: listening, busy: listening && connecting },
     { key: "light", icon: "󰌵", title: "Night light", caption: light ? "On" : "Off", toggle: true, checked: light, busy: busy },
     { key: "sound", icon: "󰎇", title: "White noise", caption: sound ? "Playing" + (status && status.track ? " · " + status.track : "") : "Off", toggle: true, checked: sound, busy: busy }
@@ -59,7 +59,6 @@ Panel {
   function activate(key) {
     if (!service) return
     if (key === "login") service.login()
-    else if (key === "watch") { if (!listening) service.toggleWatch() }
     else if (key === "listen") service.toggleListen()
     else if (key === "light") service.toggleLight()
     else if (key === "sound") service.toggleSound()
@@ -77,12 +76,13 @@ Panel {
 
   onOpenedChanged: {
     if (!service) return
+    // The picture is part of the popup: opening it starts the stream, closing
+    // it stops it again unless always-on audio keeps it.
+    service.setWatching(opened)
     if (opened) {
       cursorActive = false
       cursorIndex = 0
       service.refresh()
-    } else {
-      service.setWatching(false)
     }
   }
 
@@ -113,7 +113,7 @@ Panel {
     onPressed: function(mouseButton) {
       if (!root.service) return
       if (mouseButton === Qt.RightButton) root.service.toggleListen()
-      else if (mouseButton === Qt.MiddleButton) root.service.openWindow()
+      else if (mouseButton === Qt.MiddleButton) root.service.toggleWindow()
       else root.toggle()
     }
   }
@@ -125,7 +125,7 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Style.space(root.wanted ? 460 : 340))
+    contentWidth: panel.fittedContentWidth(Style.space(root.loggedIn ? 460 : 340))
     contentHeight: panel.fittedContentHeight(column.implicitHeight, Style.space(720))
 
     PanelKeyCatcher {
@@ -138,11 +138,10 @@ Panel {
       onTextKey: function(text) {
         if (!root.service) return
         if (text === "l") root.service.toggleListen()
-        else if (text === "w") root.activate("watch")
         else if (text === "n") root.service.toggleLight()
         else if (text === "s") root.service.toggleSound()
         else if (text === "r") root.service.refresh()
-        else if (text === "o") root.service.openWindow()
+        else if (text === "o") root.service.toggleWindow()
       }
 
       Column {
@@ -166,21 +165,30 @@ Panel {
             }
           }
           trailingControl: Component {
-            PanelActionButton {
+            Row {
               visible: root.loggedIn
-              iconText: "󰑐"
-              tooltipText: "Refresh"
-              foreground: root.foreground
-              onClicked: if (root.service) root.service.refresh()
+              spacing: Style.space(4)
+              PanelActionButton {
+                iconText: root.windowOpen ? "󰖭" : "󰏌"
+                tooltipText: root.windowOpen ? "Close the mpv window" : "Open in a window (o)"
+                foreground: root.foreground
+                onClicked: if (root.service) root.service.toggleWindow()
+              }
+              PanelActionButton {
+                iconText: "󰑐"
+                tooltipText: "Refresh (r)"
+                foreground: root.foreground
+                onClicked: if (root.service) root.service.refresh()
+              }
             }
           }
         }
 
-        // The picture. Hidden until a stream is wanted so the panel stays small.
+        // The picture.
         Rectangle {
           width: parent.width
-          height: root.wanted ? Math.round(width * 9 / 16) : 0
-          visible: root.wanted
+          height: Math.round(width * 9 / 16)
+          visible: root.loggedIn
           color: "black"
           radius: Style.cornerRadius
           clip: true
@@ -313,7 +321,6 @@ Panel {
       Text {
         width: parent.width
         visible: text !== ""
-        height: visible ? implicitHeight : 0
         text: line.row.caption || ""
         color: root.dim
         font.family: root.fontFamily

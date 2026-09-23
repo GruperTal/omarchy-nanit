@@ -33,13 +33,14 @@ code Nanit sends you. The session lands in `~/.local/state/omarchy-nanit/session
 |---|---|
 | Bar icon, left click | open the panel |
 | Bar icon, right click | toggle always-on audio |
-| Bar icon, middle click | open the camera in an external mpv window |
-| Watch | video in the popup while it is open (with sound) |
+| Bar icon, middle click | open (or close) the external mpv window |
+| Popup | shows the camera with sound for as long as it is open |
+| Pop-out button (header) | one mpv window, shown immediately while it connects; click again to close it. The in-popup audio mutes while it is open |
 | Always-on audio | keeps playing after the popup closes and after a reboot; the bar icon pulses while it connects |
 | Night light | camera night light |
 | White noise | the camera's own sound machine |
 
-Keys inside the panel: `j`/`k` move, `enter` activate, `w` watch, `l` listen,
+Keys inside the panel: `j`/`k` move, `enter` activate, `l` listen,
 `n` night light, `s` sound, `r` refresh, `o` mpv window, `esc` close.
 
 IPC, for keybindings:
