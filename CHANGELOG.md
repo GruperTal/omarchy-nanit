@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.1 — 2026-09-23
+
+- Setup installs from `requirements.lock`: every package pinned, every
+  artifact hash-verified (`pip --require-hashes`), using `/usr/bin/python3`.
+  Requested in marketplace review.
+
 ## 1.0.0 — 2026-09-23
 
 First marketplace release.

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "gruper.nanit",
   "name": "Nanit",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "Tal Gruper",
   "license": "MIT",
   "description": "Nanit baby monitor in the bar: live camera video in the popup, always-on audio while you work, night light and white noise controls.",

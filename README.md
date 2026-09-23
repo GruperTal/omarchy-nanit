@@ -37,9 +37,11 @@ omarchy bar move gruper.nanit --before omarchy.bluetooth   # optional placement
 ```
 
 Then click the icon and choose **Log in to Nanit**. That opens a terminal,
-creates a private Python venv with `aionanit` (pinned to 1.12.2, from PyPI)
-under `~/.local/share/omarchy-nanit/`, and asks for your email, password and
-the MFA code Nanit sends you. The session is saved to
+creates a private Python venv under `~/.local/share/omarchy-nanit/` with
+`/usr/bin/python3`, installs `aionanit` 1.12.2 and its dependencies from
+`requirements.lock` (every package pinned, every PyPI artifact hash-verified
+with `pip --require-hashes`), and asks for your email, password and the MFA
+code Nanit sends you. The session is saved to
 `~/.local/state/omarchy-nanit/session.json` (mode 0600) and refreshes itself
 from then on. Your credentials go to Nanit's API only; the plugin never
 stores your password.
@@ -138,6 +140,8 @@ terminal for the one-time login. Network traffic goes to `api.nanit.com` and
 
 - [`aionanit`](https://github.com/wealthystudent/ha-nanit/tree/main/packages/aionanit)
   (MIT) — Nanit cloud client, installed from PyPI into the plugin's venv.
+  Its transitive set (`aiohttp`, `protobuf` and their dependencies) is pinned
+  with hashes in `requirements.lock`, generated from PyPI's release digests.
 - The Nanit name and mark belong to Nanit. This is an independent community
   plugin, not affiliated with or endorsed by Nanit.
 

@@ -1,11 +1,16 @@
 #!/bin/bash
 # Runs nanit.py inside its own venv (aionanit is not packaged for Arch).
-#   nanit setup   creates the venv and installs aionanit
+#   nanit setup   creates the venv and installs the hash-locked requirements
+python=/usr/bin/python3
 venv=${XDG_DATA_HOME:-$HOME/.local/share}/omarchy-nanit/venv
 here=$(dirname "$(readlink -f "$0")")
 if [[ $1 == setup ]]; then
   [[ -d /usr/lib/qt6/qml/QtMultimedia ]] || echo "Warning: Qt Multimedia is missing; the shell needs it to play the stream: omarchy pkg add qt6-multimedia-ffmpeg" >&2
-  python3 -m venv "$venv" && "$venv/bin/pip" install -q "aionanit==1.12.2" && echo "Ready. Next: nanit login"
+  # Every package and version is pinned and every artifact hash-verified, so a
+  # changed or replaced PyPI file fails the install instead of running.
+  "$python" -m venv "$venv" \
+    && "$venv/bin/python" -m pip install -q --require-hashes --no-cache-dir -r "$here/../requirements.lock" \
+    && echo "Ready. Next: nanit login"
   exit
 fi
 [[ -x $venv/bin/python ]] || { echo "Not set up: run \`$0 setup\`" >&2; exit 3; }
